@@ -96,6 +96,7 @@ export default function LocationInput({
 
     try {
       let finalPoint = null;
+      const typedNumber = extractHouseNumber(addressTarget);
 
       if (selectedCoordinates && selectedCoordinates.address === addressTarget) {
         finalPoint = {
@@ -136,6 +137,28 @@ export default function LocationInput({
       }
 
       if (finalPoint) {
+        // Garante que o número digitado está no endereço final
+        const finalNumber = extractHouseNumber(finalPoint.address);
+        const resolvedNumber = finalNumber || typedNumber;
+        
+        if (typedNumber && !finalNumber) {
+          // Insere o número após a primeira parte do endereço (geralmente o nome da rua)
+          const parts = finalPoint.address.split(',');
+          if (parts.length > 0) {
+            parts[0] = `${parts[0].trim()}, ${typedNumber}`;
+            finalPoint.address = parts.join(', ');
+          } else {
+            finalPoint.address = `${finalPoint.address}, ${typedNumber}`;
+          }
+        }
+
+        // Aplica offset determinístico com base no número para diferenciar localizações na mesma rua
+        if (resolvedNumber) {
+          // Desloca aproximadamente 0.16 metros por unidade de número no mapa diagonalmente
+          finalPoint.lat = finalPoint.lat + (resolvedNumber * 0.0000015);
+          finalPoint.lng = finalPoint.lng + (resolvedNumber * 0.0000015);
+        }
+
         onAddLocation(finalPoint);
         setCurrentInput("");
         setSelectedCoordinates(null);
@@ -217,4 +240,18 @@ export default function LocationInput({
       )}
     </div>
   );
+}
+
+function extractHouseNumber(address) {
+  if (!address) return null;
+  const match = address.match(/(?:,|nº|num|no)?\s*(\d+)\s*(?:[a-zA-Z])?\b(?!.*\b\d+\b)/i) || address.match(/\b(\d+)\b/);
+  if (match) {
+    const num = parseInt(match[1], 10);
+    if (!isNaN(num)) return num;
+  }
+  return null;
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
