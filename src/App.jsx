@@ -8,7 +8,7 @@ import OptimizedRoute from './components/OptimizedRoute';
 import MapView from './components/MapView';
 
 // Chave opcional para Google Geocoding API. Se vazia, o sistema usa o Photon/OpenStreetMap de graça.
-const GOOGLE_API_KEY = ""; 
+const GOOGLE_API_KEY = "";
 
 export default function App() {
   const [startLocation, setStartLocation] = useState(null);
@@ -32,7 +32,7 @@ export default function App() {
   const handleAddLocation = (newPoint) => {
     const updatedList = [...locations, newPoint];
     setLocations(updatedList);
-    
+
     // Se a rota ainda não foi otimizada, o MapView lidará com a renderização em tempo real das localizações normais.
     if (optimizedRouteData.length > 0) {
       // Se já foi otimizada, resetamos a otimização ao adicionar novos pontos para forçar o recálculo
@@ -50,11 +50,11 @@ export default function App() {
     const newLocations = [...locations];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newLocations.length) return;
-    
+
     const temp = newLocations[index];
     newLocations[index] = newLocations[targetIndex];
     newLocations[targetIndex] = temp;
-    
+
     setLocations(newLocations);
     setOptimizedRouteData([]);
   };
@@ -64,11 +64,11 @@ export default function App() {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     // O ponto de partida (índice 0) é fixo
     if (index === 0 || targetIndex <= 0 || targetIndex >= newRoute.length) return;
-    
+
     const temp = newRoute[index];
     newRoute[index] = newRoute[targetIndex];
     newRoute[targetIndex] = temp;
-    
+
     setOptimizedRouteData(newRoute);
   };
 
@@ -102,7 +102,7 @@ export default function App() {
     }
 
     setIsOptimizing(true);
-    
+
     setTimeout(() => {
       try {
         const combinedLocations = [
@@ -123,20 +123,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-[#fafafa] flex flex-col antialiased selection:bg-indigo-500/30 selection:text-indigo-200">
-      
+
       {/* Corpo da Aplicação */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden min-h-screen">
-        
+
         {/* Painel de Controle Esquerdo */}
         <div className="lg:col-span-5 p-8 flex flex-col gap-8 border-r border-[#18181b] overflow-y-auto max-h-screen relative">
-          
+
           {/* Logo e Contexto */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2 text-indigo-400 text-xs font-mono tracking-widest uppercase">
               <Route className="w-3.5 h-3.5" />
-              <span>Route Dispatcher & Auto-Complete v2</span>
+              <span>Rotas de Vistorias - Subprefeitura Penha</span>
             </div>
-            <h1 className="text-xl font-semibold tracking-tight text-[#f4f4f5]">Otimizador de Vistorias</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-[#f4f4f5]">Otimizador de Rotas</h1>
           </div>
 
           {/* Ponto de Partida */}
@@ -152,7 +152,7 @@ export default function App() {
                   </span>
                   <p className="text-xs text-[#d4d4d8] truncate font-medium">{startLocation.address}</p>
                 </div>
-                <button 
+                <button
                   onClick={() => { setStartLocation(null); setOptimizedRouteData([]); }}
                   className="text-zinc-500 hover:text-rose-400 transition-all p-1"
                 >
@@ -160,7 +160,7 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <LocationInput 
+              <LocationInput
                 onAddLocation={(pt) => { setStartLocation(pt); setOptimizedRouteData([]); }}
                 isOptimizing={isOptimizing}
                 setStatusMessage={setStatusMessage}
@@ -175,8 +175,8 @@ export default function App() {
           {startLocation && (
             <div className="flex items-center justify-between border-b border-[#18181b] pb-4 animate-fade-in">
               <label className="flex items-center gap-2.5 text-xs font-medium text-[#a1a1aa] cursor-pointer">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0 w-3.5 h-3.5"
                   checked={roundTrip}
                   onChange={(e) => { setRoundTrip(e.target.checked); setOptimizedRouteData([]); }}
@@ -187,7 +187,7 @@ export default function App() {
           )}
 
           {/* Campo com Autocomplete em Tempo Real */}
-          <LocationInput 
+          <LocationInput
             onAddLocation={handleAddLocation}
             isOptimizing={isOptimizing}
             setStatusMessage={setStatusMessage}
@@ -199,18 +199,16 @@ export default function App() {
 
           {/* Alerta de Status */}
           {statusMessage.text && (
-            <div className={`text-[11px] font-medium flex items-center gap-2 ${
-              statusMessage.type === 'error' ? 'text-rose-400' : statusMessage.type === 'success' ? 'text-emerald-400' : 'text-zinc-400'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                statusMessage.type === 'error' ? 'bg-rose-500' : statusMessage.type === 'success' ? 'bg-emerald-500' : 'bg-zinc-500'
-              }`} />
+            <div className={`text-[11px] font-medium flex items-center gap-2 ${statusMessage.type === 'error' ? 'text-rose-400' : statusMessage.type === 'success' ? 'text-emerald-400' : 'text-zinc-400'
+              }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${statusMessage.type === 'error' ? 'bg-rose-500' : statusMessage.type === 'success' ? 'bg-emerald-500' : 'bg-zinc-500'
+                }`} />
               <p>{statusMessage.text}</p>
             </div>
           )}
 
           {/* Lista de Endereços Sincronizados individualmente */}
-          <LocationList 
+          <LocationList
             locations={locations}
             onRemoveLocation={handleRemoveLocation}
             onResetAll={handleResetAll}
@@ -234,7 +232,7 @@ export default function App() {
           )}
 
           {/* Exibição Completa das Vistorias Otimizadas */}
-          <OptimizedRoute 
+          <OptimizedRoute
             optimizedRoute={optimizedRouteData}
             roundTrip={roundTrip}
             setRoundTrip={setRoundTrip}
@@ -244,7 +242,7 @@ export default function App() {
         </div>
 
         {/* Quadro do Mapa Cartográfico */}
-        <MapView 
+        <MapView
           mapLoaded={mapLoaded}
           locations={startLocation ? [startLocation, ...locations] : locations}
           optimizedRoute={optimizedRouteData}
