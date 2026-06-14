@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Route, Sparkles } from 'lucide-react';
+import { Route, Sparkles, Trash2 } from 'lucide-react';
 import { useLeaflet } from './hooks/useLeaflet';
 import { optimizeRoute } from './utils/optimizer';
 import LocationInput from './components/LocationInput';
@@ -11,6 +11,7 @@ import MapView from './components/MapView';
 const GOOGLE_API_KEY = ""; 
 
 export default function App() {
+  const [startLocation, setStartLocation] = useState(null);
   const [locations, setLocations] = useState([]);
   const [optimizedRouteData, setOptimizedRouteData] = useState([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -46,6 +47,7 @@ export default function App() {
   };
 
   const handleResetAll = () => {
+    setStartLocation(null);
     setLocations([]);
     setOptimizedRouteData([]);
     setStatusMessage({ text: "", type: "" });
@@ -53,8 +55,12 @@ export default function App() {
 
   // Motor combinatório de otimização combinada
   const handleOptimize = () => {
-    if (locations.length < 2) {
-      setStatusMessage({ text: "Adicione pelo menos 2 endereços para construir a rota.", type: "error" });
+    if (!startLocation) {
+      setStatusMessage({ text: "Defina o ponto de partida antes de otimizar a rota.", type: "error" });
+      return;
+    }
+    if (locations.length < 1) {
+      setStatusMessage({ text: "Adicione pelo menos 1 ponto de destino para construir a rota.", type: "error" });
       return;
     }
 
@@ -62,7 +68,8 @@ export default function App() {
     
     setTimeout(() => {
       try {
-        const bestTour = optimizeRoute(locations, roundTrip);
+        const combinedLocations = [startLocation, ...locations];
+        const bestTour = optimizeRoute(combinedLocations, roundTrip);
         setOptimizedRouteData(bestTour);
         setStatusMessage({ text: "Cálculo concluído! Rota sequencial otimizada com sucesso.", type: "success" });
       } catch (error) {
@@ -92,12 +99,62 @@ export default function App() {
             <h1 className="text-xl font-semibold tracking-tight text-[#f4f4f5]">Otimizador de Vistorias</h1>
           </div>
 
+          {/* Ponto de Partida */}
+          <div className="flex flex-col gap-3">
+            <label className="text-xs font-medium text-[#a1a1aa] flex justify-between items-center">
+              <span>Ponto de Partida</span>
+            </label>
+            {startLocation ? (
+              <div className="flex items-center justify-between p-3 bg-indigo-950/20 border border-indigo-900/40 rounded-lg group animate-fade-in">
+                <div className="flex items-center gap-2.5 overflow-hidden pr-2">
+                  <span className="font-mono text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-900/50 px-1.5 py-0.5 rounded">
+                    INÍCIO
+                  </span>
+                  <p className="text-xs text-[#d4d4d8] truncate font-medium">{startLocation.address}</p>
+                </div>
+                <button 
+                  onClick={() => { setStartLocation(null); setOptimizedRouteData([]); }}
+                  className="text-zinc-500 hover:text-rose-400 transition-all p-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <LocationInput 
+                onAddLocation={(pt) => { setStartLocation(pt); setOptimizedRouteData([]); }}
+                isOptimizing={isOptimizing}
+                setStatusMessage={setStatusMessage}
+                GOOGLE_API_KEY={GOOGLE_API_KEY}
+                label="Inserir Ponto de Partida"
+                placeholder="Digite o local de início da rota..."
+                buttonText="Definir Início"
+              />
+            )}
+          </div>
+
+          {startLocation && (
+            <div className="flex items-center justify-between border-b border-[#18181b] pb-4 animate-fade-in">
+              <label className="flex items-center gap-2.5 text-xs font-medium text-[#a1a1aa] cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0 w-3.5 h-3.5"
+                  checked={roundTrip}
+                  onChange={(e) => { setRoundTrip(e.target.checked); setOptimizedRouteData([]); }}
+                />
+                <span>Retornar ao ponto inicial (Rota Circular)</span>
+              </label>
+            </div>
+          )}
+
           {/* Campo com Autocomplete em Tempo Real */}
           <LocationInput 
             onAddLocation={handleAddLocation}
             isOptimizing={isOptimizing}
             setStatusMessage={setStatusMessage}
             GOOGLE_API_KEY={GOOGLE_API_KEY}
+            label="Inserir Ponto de Destino"
+            placeholder="Digite um destino para a rota..."
+            buttonText="Adicionar"
           />
 
           {/* Alerta de Status */}
@@ -120,7 +177,7 @@ export default function App() {
           />
 
           {/* Botão de Disparo do Algoritmo Otimizador */}
-          {locations.length >= 2 && optimizedRouteData.length === 0 && (
+          {startLocation && locations.length >= 1 && optimizedRouteData.length === 0 && (
             <button
               onClick={handleOptimize}
               disabled={isOptimizing}
@@ -146,7 +203,7 @@ export default function App() {
         {/* Quadro do Mapa Cartográfico */}
         <MapView 
           mapLoaded={mapLoaded}
-          locations={locations}
+          locations={startLocation ? [startLocation, ...locations] : locations}
           optimizedRoute={optimizedRouteData}
           roundTrip={roundTrip}
         />

@@ -5,7 +5,10 @@ export default function LocationInput({
   onAddLocation, 
   isOptimizing, 
   setStatusMessage, 
-  GOOGLE_API_KEY = "" 
+  GOOGLE_API_KEY = "",
+  label = "Inserir Endereço Individual",
+  placeholder = "Comece a digitar o endereço...",
+  buttonText = "Sincronizar"
 }) {
   const [currentInput, setCurrentInput] = useState("");
   const [suggestions, setSuggestions] = useState([]);
@@ -48,9 +51,16 @@ export default function LocationInput({
         if (data && data.features) {
           const parsedSuggestions = data.features.map(feat => {
             const prop = feat.properties;
+            
+            // Constrói rua e número de forma garantida
+            let streetAndNumber = prop.street;
+            if (prop.housenumber) {
+              streetAndNumber = streetAndNumber ? `${streetAndNumber}, ${prop.housenumber}` : prop.housenumber;
+            }
+
             const addressParts = [
-              prop.name || prop.street,
-              prop.housenumber,
+              (prop.name && prop.name !== prop.street) ? prop.name : null,
+              streetAndNumber || prop.name,
               prop.district || prop.suburb,
               prop.city,
               prop.state,
@@ -151,7 +161,7 @@ export default function LocationInput({
   return (
     <div className="flex flex-col gap-3 relative" ref={dropdownRef}>
       <label className="text-xs font-medium text-[#a1a1aa] flex justify-between items-center">
-        <span>Inserir Endereço Individual</span>
+        <span>{label}</span>
         {isSearchingSuggestions && <span className="text-[10px] font-mono text-indigo-400 animate-pulse">buscando sugestões...</span>}
       </label>
       
@@ -160,7 +170,7 @@ export default function LocationInput({
           <input 
             type="text"
             className="w-full h-10 bg-[#121214] border border-[#27272a] rounded-lg pl-3 pr-8 text-xs text-[#e4e4e7] placeholder:text-[#52525b] focus:outline-none focus:border-[#3f3f46] transition-all"
-            placeholder="Comece a digitar o endereço..."
+            placeholder={placeholder}
             value={currentInput}
             onChange={(e) => setCurrentInput(e.target.value)}
             onFocus={() => { if (suggestions.length > 0) setShowDropdown(true); }}
@@ -186,7 +196,7 @@ export default function LocationInput({
           ) : (
             <Plus className="w-3.5 h-3.5" />
           )}
-          <span>Sincronizar</span>
+          <span>{buttonText}</span>
         </button>
       </div>
 
