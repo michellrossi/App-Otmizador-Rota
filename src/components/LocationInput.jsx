@@ -152,11 +152,11 @@ export default function LocationInput({
           }
         }
 
-        // Aplica offset determinístico com base no número para diferenciar localizações na mesma rua
+        // Aplica offset determinístico mínimo com base no número para diferenciar localizações na mesma rua
+        // Deslocamento de ~0.005 metros por unidade de número (~3m para nº 650) — suficiente para separar pins sem sair da rua
         if (resolvedNumber) {
-          // Desloca aproximadamente 0.16 metros por unidade de número no mapa diagonalmente
-          finalPoint.lat = finalPoint.lat + (resolvedNumber * 0.0000015);
-          finalPoint.lng = finalPoint.lng + (resolvedNumber * 0.0000015);
+          finalPoint.lat = finalPoint.lat + (resolvedNumber * 0.00000005);
+          finalPoint.lng = finalPoint.lng + (resolvedNumber * 0.00000005);
         }
 
         onAddLocation(finalPoint);
