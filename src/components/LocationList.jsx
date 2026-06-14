@@ -1,10 +1,11 @@
 import React from 'react';
-import { MapPin, Trash2 } from 'lucide-react';
+import { MapPin, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function LocationList({ 
   locations, 
   onRemoveLocation, 
-  onResetAll 
+  onResetAll,
+  onMoveLocation
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -33,17 +34,36 @@ export default function LocationList({
               className="flex items-center justify-between p-3 bg-[#121214] border border-[#1e1e21] rounded-lg group animate-fade-in"
             >
               <div className="flex items-center gap-2.5 overflow-hidden pr-2">
-                <span className="font-mono text-[10px] text-[#71717a] bg-[#1c1c1f] px-1.5 py-0.5 rounded">
+                <span className="font-mono text-[10px] text-[#71717a] bg-[#1c1c1f] px-1.5 py-0.5 rounded font-semibold">
                   #{index + 1}
                 </span>
                 <p className="text-xs text-[#d4d4d8] truncate font-medium">{loc.address}</p>
               </div>
-              <button 
-                onClick={() => onRemoveLocation(loc.id)}
-                className="text-[#52525b] hover:text-rose-400 transition-all p-1"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  disabled={index === 0}
+                  onClick={() => onMoveLocation && onMoveLocation(index, 'up')}
+                  className="text-[#52525b] hover:text-indigo-400 disabled:opacity-20 transition-all p-1"
+                  title="Mover para cima"
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  disabled={index === locations.length - 1}
+                  onClick={() => onMoveLocation && onMoveLocation(index, 'down')}
+                  className="text-[#52525b] hover:text-indigo-400 disabled:opacity-20 transition-all p-1"
+                  title="Mover para baixo"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+                <button 
+                  onClick={() => onRemoveLocation(loc.id)}
+                  className="text-[#52525b] hover:text-rose-400 transition-all p-1 ml-0.5"
+                  title="Remover endereço"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))
         )}

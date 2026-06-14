@@ -46,6 +46,43 @@ export default function App() {
     setOptimizedRouteData([]);
   };
 
+  const handleMoveLocation = (index, direction) => {
+    const newLocations = [...locations];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= newLocations.length) return;
+    
+    const temp = newLocations[index];
+    newLocations[index] = newLocations[targetIndex];
+    newLocations[targetIndex] = temp;
+    
+    setLocations(newLocations);
+    setOptimizedRouteData([]);
+  };
+
+  const handleMoveOptimizedLocation = (index, direction) => {
+    const newRoute = [...optimizedRouteData];
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    // O ponto de partida (índice 0) é fixo
+    if (index === 0 || targetIndex <= 0 || targetIndex >= newRoute.length) return;
+    
+    const temp = newRoute[index];
+    newRoute[index] = newRoute[targetIndex];
+    newRoute[targetIndex] = temp;
+    
+    setOptimizedRouteData(newRoute);
+  };
+
+  const handleToggleStopStatus = (id, newStatus = null) => {
+    const updatedRoute = optimizedRouteData.map(loc => {
+      if (loc.id === id) {
+        const status = newStatus || (loc.status === 'completed' ? 'pending' : 'completed');
+        return { ...loc, status };
+      }
+      return loc;
+    });
+    setOptimizedRouteData(updatedRoute);
+  };
+
   const handleResetAll = () => {
     setStartLocation(null);
     setLocations([]);
@@ -68,7 +105,10 @@ export default function App() {
     
     setTimeout(() => {
       try {
-        const combinedLocations = [startLocation, ...locations];
+        const combinedLocations = [
+          { ...startLocation, status: 'pending' },
+          ...locations.map(loc => ({ ...loc, status: 'pending' }))
+        ];
         const bestTour = optimizeRoute(combinedLocations, roundTrip);
         setOptimizedRouteData(bestTour);
         setStatusMessage({ text: "Cálculo concluído! Rota sequencial otimizada com sucesso.", type: "success" });
@@ -174,6 +214,7 @@ export default function App() {
             locations={locations}
             onRemoveLocation={handleRemoveLocation}
             onResetAll={handleResetAll}
+            onMoveLocation={handleMoveLocation}
           />
 
           {/* Botão de Disparo do Algoritmo Otimizador */}
@@ -197,6 +238,8 @@ export default function App() {
             optimizedRoute={optimizedRouteData}
             roundTrip={roundTrip}
             setRoundTrip={setRoundTrip}
+            onMoveLocation={handleMoveOptimizedLocation}
+            onToggleStatus={handleToggleStopStatus}
           />
         </div>
 
