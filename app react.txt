@@ -1,0 +1,618 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Plus, 
+  Trash2, 
+  Compass, 
+  MapPin, 
+  CheckCircle2, 
+  Sparkles, 
+  Info,
+  Route,
+  ChevronDown,
+  X,
+  Navigation
+} from 'lucide-react';
+
+// Chave opcional para Google Geocoding API. Se vazia, o sistema usa o Photon/OpenStreetMap de graça.
+const GOOGLE_API_KEY = ""; 
+
+export default function App() {
+  const [currentInput, setCurrentInput] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [selectedCoordinates, setSelectedCoordinates] = useState(null);
+  const [locations, setLocations] = useState([]);
+  const [optimizedRoute, setOptimizedRoute] = useState([]);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState({ text: "", type: "" });
+  const [roundTrip, setRoundTrip] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersGroupRef = useRef(null);
+  const routeLineRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  // Injetar fonte premium Plus Jakarta Sans e JetBrains Mono no cabeçalho
+  useEffect(() => {
+    const linkFont = document.createElement("link");
+    linkFont.href = "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap";
+    linkFont.rel = "stylesheet";
+    document.head.appendChild(linkFont);
+    document.body.style.fontFamily = "'Plus Jakarta Sans', sans-serif";
+
+    // Fechar dropdown de autocomplete ao clicar fora dele
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Inicialização assíncrona da biblioteca do mapa (Leaflet)
+  useEffect(() => {
+    const loadLeaflet = async () => {
+      if (window.L) { setMapLoaded(true); return; }
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      script.async = true;
+      script.onload = () => setMapLoaded(true);
+      document.head.appendChild(script);
+    };
+    loadLeaflet();
+  }, []);
+
+  useEffect(() => {
+    if (mapLoaded && mapRef.current && !mapInstanceRef.current) {
+      const map = window.L.map(mapRef.current, { zoomControl: false }).setView([-23.55052, -46.633308], 12);
+      
+      // Visual do mapa: CartoDB Dark Matter (Combina perfeitamente com interfaces Minimal Dark SaaS)
+      window.L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap / CARTO'
+      }).addTo(map);
+
+      mapInstanceRef.current = map;
+      markersGroupRef.current = window.L.featureGroup().addTo(map);
+    }
+  }, [mapLoaded]);
+
+  // Algoritmo de Debounce para busca preditiva de endereços
+  useEffect(() => {
+    if (currentInput.trim().length < 3) {
+      setSuggestions([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    // Se o input atual for exatamente igual à última coordenada selecionada, não re-busca
+    if (selectedCoordinates && selectedCoordinates.address === currentInput) {
+      return;
+    }
+
+    setIsSearchingSuggestions(true);
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(currentInput)}&limit=5&lang=pt`);
+        const data = await res.json();
+        
+        if (data && data.features) {
+          const parsedSuggestions = data.features.map(feat => {
+            const prop = feat.properties;
+            const addressParts = [
+              prop.name || prop.street,
+              prop.housenumber,
+              prop.district || prop.suburb,
+              prop.city,
+              prop.state,
+              prop.country
+            ].filter(Boolean);
+
+            return {
+              address: addressParts.join(', '),
+              lat: feat.geometry.coordinates[1],
+              lng: feat.geometry.coordinates[0]
+            };
+          });
+          setSuggestions(parsedSuggestions);
+          setShowDropdown(parsedSuggestions.length > 0);
+        }
+      } catch (err) {
+        console.error("Erro na busca de sugestões", err);
+      } finally {
+        setIsSearchingSuggestions(false);
+      }
+    }, 300); // 300ms de atraso controlado
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [currentInput, selectedCoordinates]);
+
+  const clearMapLayer = () => {
+    if (markersGroupRef.current) markersGroupRef.current.clearLayers();
+    if (routeLineRef.current && mapInstanceRef.current) {
+      mapInstanceRef.current.removeLayer(routeLineRef.current);
+      routeLineRef.current = null;
+    }
+  };
+
+  // Renderização em tempo real das coordenadas e linhas geométricas do traçado
+  const updateMapRoute = (routeData) => {
+    if (!mapInstanceRef.current || !window.L) return;
+    clearMapLayer();
+
+    if (routeData.length === 0) return;
+    const coordinates = routeData.map(pt => [pt.lat, pt.lng]);
+
+    routeData.forEach((pt, idx) => {
+      const isFirst = idx === 0;
+      const isLast = idx === routeData.length - 1 && !roundTrip;
+      let borderHex = '#6366f1'; // Indigo base
+      
+      if (isFirst) borderHex = '#10b981'; // Verde de Origem
+      else if (isLast) borderHex = '#f43f5e'; // Rosa/Vermelho de Fim
+
+      const icon = window.L.divIcon({
+        className: 'custom-minimal-icon',
+        html: `<div class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-950 border-2 font-mono text-[10px] font-bold text-slate-200 animate-fade-in" style="border-color: ${borderHex}">${idx + 1}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+
+      window.L.marker([pt.lat, pt.lng], { icon })
+        .bindPopup(`<div class="text-xs font-sans text-slate-900 font-medium">${pt.address}</div>`)
+        .addTo(markersGroupRef.current);
+    });
+
+    if (routeData.length > 1) {
+      const activePath = [...coordinates];
+      if (roundTrip) activePath.push(coordinates[0]);
+
+      routeLineRef.current = window.L.polyline(activePath, {
+        color: '#818cf8',
+        weight: 2,
+        opacity: 0.9,
+        lineJoin: 'round'
+      }).addTo(mapInstanceRef.current);
+    }
+
+    const bounds = markersGroupRef.current.getBounds();
+    if (bounds.isValid()) {
+      mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
+    }
+  };
+
+  const calculateHaversine = (c1, c2) => {
+    const R = 6371;
+    const dLat = (c2.lat - c1.lat) * Math.PI / 180;
+    const dLon = (c2.lng - c1.lng) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(c1.lat * Math.PI / 180) * Math.cos(c2.lat * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+  };
+
+  // Sincroniza o endereço individualmente
+  const handleSyncAddress = async (e) => {
+    if (e) e.preventDefault();
+    const addressTarget = currentInput.trim();
+    if (!addressTarget) return;
+
+    setIsGeocoding(true);
+    setStatusMessage({ text: "Sincronizando e validando coordenadas...", type: "info" });
+
+    try {
+      let finalPoint = null;
+
+      // Caso o usuário tenha clicado em uma sugestão do autocomplete, evitamos o fetch geocoding adicional
+      if (selectedCoordinates && selectedCoordinates.address === addressTarget) {
+        finalPoint = {
+          id: crypto.randomUUID(),
+          userInput: addressTarget,
+          address: selectedCoordinates.address,
+          lat: selectedCoordinates.lat,
+          lng: selectedCoordinates.lng
+        };
+      } else {
+        // Fallback caso ele tenha digitado tudo e clicado direto em sincronizar sem clicar no autocomplete
+        if (GOOGLE_API_KEY) {
+          const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressTarget)}&key=${GOOGLE_API_KEY}`);
+          const data = await res.json();
+          if (data.status === "OK" && data.results.length > 0) {
+            finalPoint = {
+              id: crypto.randomUUID(),
+              userInput: addressTarget,
+              address: data.results[0].formatted_address,
+              lat: data.results[0].geometry.location.lat,
+              lng: data.results[0].geometry.location.lng
+            };
+          }
+        } else {
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressTarget)}&limit=1`, {
+            headers: { 'User-Agent': 'Vistoria-Autocomplete-Client' }
+          });
+          const data = await res.json();
+          if (data && data.length > 0) {
+            finalPoint = {
+              id: crypto.randomUUID(),
+              userInput: addressTarget,
+              address: data[0].display_name,
+              lat: parseFloat(data[0].lat),
+              lng: parseFloat(data[0].lon)
+            };
+          }
+        }
+      }
+
+      if (finalPoint) {
+        const updatedList = [...locations, finalPoint];
+        setLocations(updatedList);
+        setCurrentInput("");
+        setSelectedCoordinates(null);
+        setSuggestions([]);
+        setShowDropdown(false);
+        setStatusMessage({ text: "Endereço sincronizado com sucesso!", type: "success" });
+        
+        if (optimizedRoute.length === 0) {
+          updateMapRoute(updatedList);
+        }
+      } else {
+        setStatusMessage({ text: "Endereço não localizado. Tente selecionar uma sugestão da lista.", type: "error" });
+      }
+    } catch (err) {
+      setStatusMessage({ text: "Falha na sincronização cartográfica.", type: "error" });
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  const handleSelectSuggestion = (sug) => {
+    setCurrentInput(sug.address);
+    setSelectedCoordinates(sug);
+    setShowDropdown(false);
+  };
+
+  const handleRemoveLocation = (id) => {
+    const updated = locations.filter(item => item.id !== id);
+    setLocations(updated);
+    setOptimizedRoute([]);
+    updateMapRoute(updated);
+  };
+
+  // Motor combinatório de otimização combinada (Nearest Neighbor + Refinamento 2-Opt)
+  const handleOptimizeRoute = () => {
+    if (locations.length < 2) {
+      setStatusMessage({ text: "Adicione pelo menos 2 endereços para construir a rota.", type: "error" });
+      return;
+    }
+
+    setIsOptimizing(true);
+    
+    setTimeout(() => {
+      let unvisited = [...locations.slice(1)];
+      let current = locations[0];
+      let tour = [current];
+
+      while (unvisited.length > 0) {
+        let nextIdx = 0;
+        let minDist = calculateHaversine(current, unvisited[0]);
+        for (let i = 1; i < unvisited.length; i++) {
+          const d = calculateHaversine(current, unvisited[i]);
+          if (d < minDist) { minDist = d; nextIdx = i; }
+        }
+        current = unvisited[nextIdx];
+        tour.push(current);
+        unvisited.splice(nextIdx, 1);
+      }
+
+      const cost = (t) => {
+        let d = 0;
+        for (let i = 0; i < t.length - 1; i++) d += calculateHaversine(t[i], t[i+1]);
+        if (roundTrip) d += calculateHaversine(t[t.length - 1], t[0]);
+        return d;
+      };
+
+      let bestTour = [...tour];
+      let bestDist = cost(bestTour);
+      let globImproved = true;
+
+      while (globImproved) {
+        globImproved = false;
+        for (let i = 1; i < bestTour.length - 1; i++) {
+          for (let j = i + 1; j < bestTour.length; j++) {
+            let newTour = [...bestTour];
+            const sub = newTour.slice(i, j + 1).reverse();
+            newTour.splice(i, sub.length, ...sub);
+            let newDist = cost(newTour);
+            if (newDist < bestDist) {
+              bestTour = newTour;
+              bestDist = newDist;
+              globImproved = true;
+            }
+          }
+        }
+      }
+
+      setOptimizedRoute(bestTour);
+      updateMapRoute(bestTour);
+      setIsOptimizing(false);
+      setStatusMessage({ text: "Cálculo concluído! Rota sequencial otimizada com sucesso.", type: "success" });
+    }, 300);
+  };
+
+  const handleResetAll = () => {
+    setLocations([]);
+    setOptimizedRoute([]);
+    setCurrentInput("");
+    setSuggestions([]);
+    setSelectedCoordinates(null);
+    setStatusMessage({ text: "", type: "" });
+    clearMapLayer();
+  };
+
+  const getGoogleMapsBundleUrl = () => {
+    if (optimizedRoute.length === 0) return "#";
+    const start = `${optimizedRoute[0].lat},${optimizedRoute[0].lng}`;
+    const endLoc = roundTrip ? optimizedRoute[0] : optimizedRoute[optimizedRoute.length - 1];
+    const end = `${endLoc.lat},${endLoc.lng}`;
+    const midPoints = optimizedRoute.slice(1, roundTrip ? optimizedRoute.length : optimizedRoute.length - 1)
+                                   .map(p => `${p.lat},${p.lng}`).join("|");
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(end)}&waypoints=${encodeURIComponent(midPoints)}&travelmode=driving`;
+  };
+
+  return (
+    <div className="min-h-screen bg-[#09090b] text-[#fafafa] flex flex-col antialiased selection:bg-indigo-500/30 selection:text-indigo-200">
+      
+      {/* Corpo da Aplicação */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden min-h-screen">
+        
+        {/* Painel de Controle Esquerdo */}
+        <div className="lg:col-span-5 p-8 flex flex-col gap-8 border-r border-[#18181b] overflow-y-auto max-h-screen relative">
+          
+          {/* Logo e Contexto */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-indigo-400 text-xs font-mono tracking-widest uppercase">
+              <Route className="w-3.5 h-3.5" />
+              <span>Route Dispatcher & Auto-Complete v2</span>
+            </div>
+            <h1 className="text-xl font-semibold tracking-tight text-[#f4f4f5]">Otimizador de Vistorias</h1>
+          </div>
+
+          {/* Campo com Autocomplete em Tempo Real */}
+          <div className="flex flex-col gap-3 relative" ref={dropdownRef}>
+            <label className="text-xs font-medium text-[#a1a1aa] flex justify-between items-center">
+              <span>Inserir Endereço Individual</span>
+              {isSearchingSuggestions && <span className="text-[10px] font-mono text-indigo-400 animate-pulse">buscando sugestões...</span>}
+            </label>
+            
+            <div className="flex gap-2 relative">
+              <div className="relative flex-1">
+                <input 
+                  type="text"
+                  className="w-full h-10 bg-[#121214] border border-[#27272a] rounded-lg pl-3 pr-8 text-xs text-[#e4e4e7] placeholder:text-[#52525b] focus:outline-none focus:border-[#3f3f46] transition-all"
+                  placeholder="Comece a digitar o endereço..."
+                  value={currentInput}
+                  onChange={(e) => setCurrentInput(e.target.value)}
+                  onFocus={() => { if (suggestions.length > 0) setShowDropdown(true); }}
+                  disabled={isGeocoding || isOptimizing}
+                />
+                {currentInput && (
+                  <button 
+                    onClick={() => { setCurrentInput(""); setSelectedCoordinates(null); setSuggestions([]); }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-all"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={handleSyncAddress}
+                disabled={isGeocoding || !currentInput.trim()}
+                className="h-10 px-4 bg-[#f4f4f5] hover:bg-[#e4e4e7] disabled:opacity-20 text-[#09090b] text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-all shrink-0"
+              >
+                {isGeocoding ? (
+                  <div className="w-3.5 h-3.5 border-2 border-[#09090b]/30 border-t-[#09090b] rounded-full animate-spin" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5" />
+                )}
+                <span>Sincronizar</span>
+              </button>
+            </div>
+
+            {/* Dropdown de Sugestões Premium */}
+            {showDropdown && suggestions.length > 0 && (
+              <div className="absolute top-[72px] left-0 w-full bg-[#121214] border border-[#27272a] rounded-lg shadow-2xl z-35 max-h-56 overflow-y-auto animate-fade-in divide-y divide-[#1e1e21]">
+                {suggestions.map((sug, i) => (
+                  <div
+                    key={i}
+                    onClick={() => handleSelectSuggestion(sug)}
+                    className="p-3 hover:bg-[#1c1c1f] cursor-pointer transition-all flex items-start gap-2.5"
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
+                    <span className="text-xs text-[#d4d4d8] leading-tight line-clamp-2">{sug.address}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Alerta de Status */}
+          {statusMessage.text && (
+            <div className={`text-[11px] font-medium flex items-center gap-2 ${
+              statusMessage.type === 'error' ? 'text-rose-400' : statusMessage.type === 'success' ? 'text-emerald-400' : 'text-zinc-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                statusMessage.type === 'error' ? 'bg-rose-500' : statusMessage.type === 'success' ? 'bg-emerald-500' : 'bg-zinc-500'
+              }`} />
+              <p>{statusMessage.text}</p>
+            </div>
+          )}
+
+          {/* Lista de Endereços Sincronizados individualmente */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between text-xs text-[#71717a]">
+              <span>Pontos de Fiscalização Sincronizados ({locations.length})</span>
+              {locations.length > 0 && (
+                <button onClick={handleResetAll} className="hover:text-zinc-200 text-[11px] transition-all">Limpar tudo</button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
+              {locations.length === 0 ? (
+                <div className="border border-dashed border-[#27272a] rounded-xl p-8 text-center text-xs text-[#52525b] flex flex-col items-center gap-2">
+                  <MapPin className="w-5 h-5 text-zinc-700" />
+                  <span>Digite e sincronize o primeiro endereço acima.</span>
+                </div>
+              ) : (
+                locations.map((loc, index) => (
+                  <div key={loc.id} className="flex items-center justify-between p-3 bg-[#121214] border border-[#1e1e21] rounded-lg group animate-fade-in">
+                    <div className="flex items-center gap-2.5 overflow-hidden pr-2">
+                      <span className="font-mono text-[10px] text-[#71717a] bg-[#1c1c1f] px-1.5 py-0.5 rounded">#{index + 1}</span>
+                      <p className="text-xs text-[#d4d4d8] truncate font-medium">{loc.address}</p>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveLocation(loc.id)}
+                      className="text-[#52525b] hover:text-rose-400 transition-all p-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Botão de Disparo do Algoritmo Otimizador */}
+          {locations.length >= 2 && optimizedRoute.length === 0 && (
+            <button
+              onClick={handleOptimizeRoute}
+              disabled={isOptimizing}
+              className="w-full h-11 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all"
+            >
+              {isOptimizing ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              <span>Otimizar Rota de Fiscalização (TSP)</span>
+            </button>
+          )}
+
+          {/* Exibição Completa das Vistorias Otimizadas */}
+          {optimizedRoute.length > 0 && (
+            <div className="flex-1 flex flex-col gap-6 border-t border-[#18181b] pt-6 animate-fade-in">
+              
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2.5 text-xs font-medium text-[#a1a1aa] cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="rounded bg-zinc-900 border-zinc-700 text-indigo-600 focus:ring-0 w-3.5 h-3.5"
+                    checked={roundTrip}
+                    onChange={(e) => {
+                      setRoundTrip(e.target.checked);
+                      setTimeout(() => updateMapRoute(optimizedRoute), 50);
+                    }}
+                  />
+                  <span>Retornar ao ponto inicial</span>
+                </label>
+                
+                {/* Botão de Navegação Agrupada Completa */}
+                <a
+                  href={getGoogleMapsBundleUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-8 px-3 bg-[#1c1c1f] hover:bg-[#27272a] border border-[#27272a] rounded-md text-[11px] font-medium flex items-center gap-2 transition-all text-zinc-200"
+                >
+                  {/* Logo Google Maps SVG Oficial */}
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="#4285F4"/>
+                    <path d="M12 2c-3.87 0-7 3.13-7 7 0 1 .19 1.96.53 2.84l6.47-6.47V2.05C12 2.03 12 2 12 2z" fill="#EA4335"/>
+                    <path d="M19.47 11.84c.34-.88.53-1.84.53-2.84 0-3.87-3.13-7-7-7v3.36l6.47 6.48z" fill="#FBBC05"/>
+                    <path d="M12 22s7-7.75 7-13c0-.35-.03-.69-.08-1.03L12 14.92V22z" fill="#34A853"/>
+                  </svg>
+                  <span>Iniciar Rota Unificada</span>
+                </a>
+              </div>
+
+              {/* Lista dos Trechos Sequenciados com Logos Originais */}
+              <div className="flex flex-col gap-2.5">
+                <span className="text-[10px] font-mono tracking-wider text-[#52525b] uppercase">Fila de Atendimento Otimizada</span>
+                
+                <div className="flex flex-col gap-2">
+                  {optimizedRoute.map((loc, idx) => (
+                    <div key={loc.id} className="bg-[#121214] border border-[#18181b] rounded-xl p-4 flex items-center justify-between gap-4 group hover:border-[#27272a] transition-all">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className="w-5 h-5 rounded-full bg-[#1c1c1f] flex items-center justify-center text-[10px] font-mono text-zinc-400 font-bold shrink-0">
+                          {idx + 1}
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className="text-xs text-zinc-200 truncate font-medium">{loc.address}</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">Disponível para GPS direto</p>
+                        </div>
+                      </div>
+
+                      {/* Botões GPS de Navegação com Vetores de Marcas Oficiais */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* Botão Oficial Google Maps */}
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-8 h-8 rounded-lg bg-[#1c1c1f] hover:bg-[#27272a] border border-[#27272a] flex items-center justify-center transition-all"
+                          title="Abrir no Google Maps"
+                        >
+                          {/* Logotipo Oficial do Google Maps (Estrutura 4 Cores) */}
+                          <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2Z" fill="#4285F4"/>
+                            <path d="M12 2C9.28 2 7.02 3.56 5.92 5.83L12 11.91V2.05C12.00 2.05 12.00 2 12 2Z" fill="#EA4335"/>
+                            <path d="M19.08 7.83C18.52 5.42 16.73 3.49 14.39 2.65L12 5.04V9.67L19.08 7.83Z" fill="#FBBC05"/>
+                            <path d="M12 22C12 22 19 14.25 19 9C19 8.59 18.96 8.19 18.88 7.81L12 14.69V22Z" fill="#34A853"/>
+                            <circle cx="12" cy="9" r="2.5" fill="#FFFFFF"/>
+                          </svg>
+                        </a>
+
+                        {/* Botão Oficial Waze */}
+                        <a
+                          href={`https://waze.com/ul?ll=${loc.lat},${loc.lng}&navigate=yes`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-8 h-8 rounded-lg bg-[#1c1c1f] hover:bg-[#27272a] border border-[#27272a] flex items-center justify-center transition-all"
+                          title="Iniciar Navegação com Waze"
+                        >
+                          {/* Logotipo Oficial Waze (Mascote Icônico em Vetor) */}
+                          <svg className="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path fillRule="evenodd" clipRule="evenodd" d="M15.176 17.5C15.176 18.328 14.504 19 13.676 19C12.848 19 12.176 18.328 12.176 17.5C12.176 16.672 12.848 16 13.676 16C14.504 16 15.176 16.672 15.176 17.5ZM8.176 17.5C8.176 18.328 7.504 19 6.676 19C5.848 19 5.176 18.328 5.176 17.5C5.176 16.672 5.848 16 6.676 16C7.504 16 8.176 16.672 8.176 17.5ZM10.518 2.006C5.006 2.144 0.5 6.674 0.5 12.202C0.5 14.582 1.34 16.772 2.744 18.498L2.012 21.366C1.904 21.786 2.296 22.152 2.716 22.022L5.438 21.182C6.91 22.11 8.642 22.65 10.518 22.65C16.03 22.512 20.5 17.982 20.5 12.454C20.5 6.926 16.03 2.144 10.518 2.006Z" fill="#33CCFF"/>
+                            <path d="M13.676 18C13.952 18 14.176 17.776 14.176 17.5C14.176 17.224 13.952 17 13.676 17C13.4 17 13.176 17.224 13.176 17.5C13.176 17.776 13.4 18 13.676 18ZM6.676 18C6.952 18 7.176 17.776 7.176 17.5C7.176 17.224 6.952 17 6.676 17C6.4 17 6.176 17.224 6.176 17.5C6.176 17.776 6.4 18 6.676 18Z" fill="white"/>
+                          </svg>
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          )}
+        </div>
+
+        {/* Quadro do Mapa Cartográfico */}
+        <div className="lg:col-span-7 bg-[#09090b] relative flex flex-col min-h-[350px] lg:min-h-0">
+          <div ref={mapRef} className="w-full h-full z-10 bg-[#09090b]" />
+          
+          {/* Assinatura Visual Absoluta */}
+          <div className="absolute bottom-4 left-4 z-20 pointer-events-none opacity-40">
+            <span className="text-[9px] font-mono tracking-widest text-zinc-400 uppercase">OSM AUTOCOMPLETE ENGINE ENABLED</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
