@@ -42,7 +42,7 @@ export default function LocationInput({
     setIsSearchingSuggestions(true);
     const delayDebounceFn = setTimeout(async () => {
       try {
-        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(currentInput)}&limit=5&lang=pt`);
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(currentInput)}&limit=5`);
         const data = await res.json();
         
         if (data && data.features) {
